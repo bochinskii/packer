@@ -1,0 +1,291 @@
+-----------------------------------------------------------------
+
+Cоздания безсмысленного образа
+
+----------------------------------------------------------------
+
+Теперь от попытки создания безсмысленного образа ОС мы перейдем к все таки созданию безсмысленного образа.
+
+Почему безсмысленного? Да потому что мы просто установим ОС, но далее ничего делать не будем.
+Такой образ можно скачать где угодно или воспользоваться vagrant.
+
+По сути мы доконца сделаем - build часть, но не будем делать остальные. Это делается для того,
+чтобы заострить внимание на параметре - boot_command.
+
+На выходе мы получим файл - ova, который можно будет импортировать в virtualbox и получить установленную виртуальную машину.
+
+В качестве бонуса опишем установку legacy сервера (хотя в скором времени ubuntu уберет такую возможность)
+и live server. Можно было бы и не описывать legacy, но мы опишем т.к.
+debian пока устанавливается таким образом. Да и RedHat примерно подобным образом.
+
+$ mkdir ./002_Create_nonsensical_image && cd ./002_Create_nonsensical_image
+
+------------------------------
+
+Legacy server Ubuntu 20.04
+
+-----------------------------
+
+$ mkdir ./legacy && cd ./legacy
+
+$ mkdir ./http
+
+
+
+
+Вот наш hcl файл - full_legacy.pkr.hcl. С ним можно ознакомится в директории с проектом
+
+Здесь важным моментом является - ssh_wait_timeout.
+Нужно дать достаточно большое число т.к. packer может подключится к виртуальной машине тогда,
+когда она еще не успела установится и тогда произойдет ошибка.
+
+Параметр - boot_wait варируется от того, какой  дистрибутив устанавливается.
+Всегда нужно проверять это на глаз. По идее на boot_command он не влияет, но как
+показывает практика не всегда загрузочные команды проходят при определенных значениях boot_wait.
+
+boot_command - взят с официального сайта packer
+https://www.packer.io/guides/automatic-operating-system-installs/preseed_ubuntu
+правда, вот эта часть - netcfg/get_hostname=ubu-lemp добавлена т.к. hostname упорно
+не хочет настраиваться из preseed.cfg файла.
+
+Да, что такое preseed файл. Это по сути файл ответов. Он скачивается с помощью web
+сервера, который создает packer (мы упоминали об этом выше). Для этого нужно в
+рабочей директори создать папку (что мы и сделали ранее) - http и положить туда preseed файл.
+
+
+
+
+С файлом - preseed.cfg можно ознакомиться в директории с проектом
+
+Вы наверное ужаснулись, когда увидели preseed файл. Но на самом деле там ничего сложного.
+
+Про preseed.cfg файл можно найти в официальной документации Ubuntu - https://help.ubuntu.com/20.04/installation-guide/
+Просто вбейте - "Automating the installation using preseeding" и найдете документацию.
+Перелистывайте на - " Creating a preconfiguration file" - https://help.ubuntu.com/20.04/installation-guide/amd64/apbs04.html
+Там достаочно хорошо описано и понятно как данный файл конфигурировать.
+
+Единственная запунтаность может быть при создании партиций.
+
+Вот к примеру - 512 1 1024.
+Первое число - минимальный (по факту тот что будет) размер партиции.
+Воторое число - приоритет. Чем меньше число тем больше вероятность, что эта
+партиция получит указанное значение (вот это действительно беровая штука).
+Третье число - максимально возможный размер партиции.
+
+Знак - "\" обязательный, если вы будите переходить на другую строку (а вы будите).
+Как уже стало понятно, данный параметр пишется в одну строку, а знак - "\" позволяет
+переходить на другую строчку.
+
+Кстати, root-recipe - это имя (оно может быть любым).
+Это имя нужно давать для того, чтобы потом обратиться к нему - "d-i partman-auto/choose_recipe select root-recipe"
+
+Ну и такой момент. Часть preseed файла с - # Locales. Должа иметь именно такой вид (можно даже оставить первую строчку).
+Больше ничего касательно locale не должно быть т.к. дистрибутив не хотел устанавливаться. Так что имейте ввиду.
+
+После выполнения кода мы в папке - output-<build_name> получим ova файлл, который может импортировать в virtualbox.
+
+Запускаем.
+
+$ packer validate full_legacy.pkr.hcl
+
+The configuration is valid.
+
+
+$ packer build full_legacy.pkr.hcl
+
+virtualbox-iso.ubu_lemp: output will be in this color.
+
+==> virtualbox-iso.ubu_lemp: Cannot find "Default Guest Additions ISO" in vboxmanage output (or it is empty)
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions checksums
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS => /home/denisb/.cache/packer/56d34eb5b01d7b6828c02b5976a2042eade3a41e
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c => /home/denisb/.cache/packer/1965a58e0c779c1d2892fb75a492f70fdc04268f.iso
+==> virtualbox-iso.ubu_lemp: Retrieving ISO
+==> virtualbox-iso.ubu_lemp: Trying http://cdimage.ubuntu.com/ubuntu-legacy-server/releases/focal/release/ubuntu-20.04.1-legacy-server-amd64.iso
+==> virtualbox-iso.ubu_lemp: Trying http://cdimage.ubuntu.com/ubuntu-legacy-server/releases/focal/release/ubuntu-20.04.1-legacy-server-amd64.iso?checksum=sha256%3Af11bda2f2caed8f420802b59f382c25160b114ccc665dbac9c5046e7fceaced2
+    virtualbox-iso.ubu_lemp: ubuntu-20.04.1-legacy-server-amd64.iso 816.00 MiB / 816.00 MiB [==============================================================] 100.00% 2m28s
+==> virtualbox-iso.ubu_lemp: http://cdimage.ubuntu.com/ubuntu-legacy-server/releases/focal/release/ubuntu-20.04.1-legacy-server-amd64.iso?checksum=sha256%3Af11bda2f2caed8f420802b59f382c25160b114ccc665dbac9c5046e7fceaced2 => /home/denisb/.cache/packer/48e4ec4daa32571605576c5566f486133ecc271f.iso
+==> virtualbox-iso.ubu_lemp: Starting HTTP server on port 8038
+==> virtualbox-iso.ubu_lemp: Creating virtual machine...
+==> virtualbox-iso.ubu_lemp: Creating hard drive output-ubu_lemp/ubu-lemp.vdi with size 60000 MiB...
+==> virtualbox-iso.ubu_lemp: Mounting ISOs...
+    virtualbox-iso.ubu_lemp: Mounting boot ISO...
+==> virtualbox-iso.ubu_lemp: Creating forwarded port mapping for communicator (SSH, WinRM, etc) (host port 2879)
+==> virtualbox-iso.ubu_lemp: Starting the virtual machine...
+==> virtualbox-iso.ubu_lemp: Waiting 10s for boot...
+==> virtualbox-iso.ubu_lemp: Typing the boot command...
+==> virtualbox-iso.ubu_lemp: Using SSH communicator to connect: 127.0.0.1
+==> virtualbox-iso.ubu_lemp: Waiting for SSH to become available...
+==> virtualbox-iso.ubu_lemp: Connected to SSH!
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox version info (6.1.32)
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox guest additions ISO...
+==> virtualbox-iso.ubu_lemp: Gracefully halting virtual machine...
+==> virtualbox-iso.ubu_lemp: [sudo] password for vagrant:
+==> virtualbox-iso.ubu_lemp: Preparing to export machine...
+    virtualbox-iso.ubu_lemp: Deleting forwarded port mapping for the communicator (SSH, WinRM, etc) (host port 2879)
+==> virtualbox-iso.ubu_lemp: Exporting virtual machine...
+    virtualbox-iso.ubu_lemp: Executing: export ubu-lemp --output output-ubu_lemp/ubu-lemp.ovf
+==> virtualbox-iso.ubu_lemp: Cleaning up floppy disk...
+==> virtualbox-iso.ubu_lemp: Deregistering and deleting VM...
+Build 'virtualbox-iso.ubu_lemp' finished after 19 minutes 27 seconds.
+
+==> Wait completed after 19 minutes 27 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> virtualbox-iso.ubu_lemp: VM files in directory: output-ubu_lemp
+
+Все готово
+
+
+$ ls -lh output-ubu_lemp/
+total 765M
+-rw-rw-r-- 1 denisb denisb 765M июн  4 15:14 ubu-lemp-disk001.vmdk
+-rwx------ 1 denisb denisb 7,3K июн  4 15:12 ubu-lemp.ovf
+
+
+
+
+
+-----------------------------
+
+Live Server Ubuntu 22.04
+
+-----------------------------
+
+$ mkdri ./liveserve $$ cd ./liveserver
+
+$ mkdir ./http
+
+
+
+С файлом - full.pkr.hcl можно ознакомится в диреткории с проектом
+
+
+Тут изменения коснулись дистрибутива (ну, это логично).
+
+Самое главное изменения в - boot_command. Тут несколько другие параметры и
+несколько другая логика касательно web сервера packer.
+
+Тут не нужно указывать никакой - preseed.cfg файл или како либо другой.
+
+При автоматической инсталяции ubuntu (да и другие дистрибутивы, которые будут
+уметь - cloud-config), ищет в указаном месте (или web сервере) файлы - user-data и meta-data.
+Последний файл должен быть пустым. Файл - user-data - это что-то типа уже нам известного preseed файла.
+
+
+
+
+С файлом user-data можно ознакомиться в директории с проектом. еще раз напомниаем, что
+файл - meta-data (даже пустой) должен присувтсвовать в директории http иначе ничего не будет работать.
+
+Вот тут есть некоторая документация по тому как писать данный файл
+https://ubuntu.com/server/docs/install/autoinstall
+
+Она, конечно скудная, но может в дальнейшем будут ее развивать.
+
+Тут проблема была в создании партиций (хотя можно было бы этим и не заниматься, а сделать все по умолчанию).
+Сразу скажем, что лучший способ написать данный файл так это поставить ОС.
+Далее подобный файл будет создан - /var/log/installer/autoinstall-user-data.
+Можно его забрать и сделать свой - user-data по образу и подобию.
+
+
+
+Немного опишем.
+
+Параметр - early-commands необходим. Если его не будет, то packer почему-то лезет по ssh во время установки ОС.
+Естественно подключиться не может и выдает ошибку.
+
+С помощью параметра - storage мы сделали gpt разметку (live server поддерживает только ее).
+Сделали 4 раздела. 1 - для совместимости с bios, 2 - /boot, 3 -  swap, ну а 4 - /.
+Параметр - swap: swap: 0 означает, что мы не используем в качестве swap файл.
+Хотя если хотите можете использовать вместо партиции.
+
+Важный момент - identity, а именно - password. Тут нужно использовать пароль хешируемый (сам пароь - vagrant).
+Вот как это сделали мы
+
+$ sudo apt install whois
+
+$ mkpasswd --method=SHA-512 --rounds=4096
+Password: <enter password>
+$6$rounds=4096$3KIRw0MbiIzfY$5G7ApHwhBUM3PWBws3NCygnBqXSxPWXaEDcP.UUpxwr9AlOp/U.3iha5m0iem.oq1Y2/FWzHl6a5PiRNJ6fUe1
+
+или вот так, но без rounds
+
+# openssl passwd -6 vagrant
+6$8cM1/uu2QHV85koa$y1oxbKjUmRnGTD0Q.ONX9LNrijL6U0LFswoWddr4EGzAcW5fGsU6iQ9rY30Ku7rUYwDDYiF969UeQPQg7D4DO/
+
+
+
+
+Запускаем.
+
+$ packer build full.pkr.hcl
+virtualbox-iso.ubu_lemp: output will be in this color.
+
+==> virtualbox-iso.ubu_lemp: Cannot find "Default Guest Additions ISO" in vboxmanage output (or it is empty)
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions checksums
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+    virtualbox-iso.ubu_lemp: SHA256SUMS 2.67 KiB / 2.67 KiB [=================================================================================================] 100.00% 0s
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS => /home/denisb/.cache/packer/56d34eb5b01d7b6828c02b5976a2042eade3a41e
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c
+    virtualbox-iso.ubu_lemp: VBoxGuestAdditions_6.1.32.iso 59.50 MiB / 59.50 MiB [============================================================================] 100.00% 9s
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c => /home/denisb/.cache/packer/1965a58e0c779c1d2892fb75a492f70fdc04268f.iso
+==> virtualbox-iso.ubu_lemp: Retrieving ISO
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/jammy/ubuntu-22.04-live-server-amd64.iso
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/jammy/ubuntu-22.04-live-server-amd64.iso?checksum=sha256%3A84aeaf7823c8c61baa0ae862d0a06b03409394800000b3235854a6b38eb4856f
+    virtualbox-iso.ubu_lemp: ubuntu-22.04-live-server-amd64.iso 1.37 GiB / 1.37 GiB [======================================================================] 100.00% 4m21s
+==> virtualbox-iso.ubu_lemp: http://releases.ubuntu.com/jammy/ubuntu-22.04-live-server-amd64.iso?checksum=sha256%3A84aeaf7823c8c61baa0ae862d0a06b03409394800000b3235854a6b38eb4856f => /home/denisb/.cache/packer/b9441068de828d36573e1274dfe77f69aebda15a.iso
+==> virtualbox-iso.ubu_lemp: Starting HTTP server on port 8163
+==> virtualbox-iso.ubu_lemp: Creating virtual machine...
+==> virtualbox-iso.ubu_lemp: Creating hard drive output-ubu_lemp/ubu-lemp.vdi with size 60000 MiB...
+==> virtualbox-iso.ubu_lemp: Mounting ISOs...
+    virtualbox-iso.ubu_lemp: Mounting boot ISO...
+==> virtualbox-iso.ubu_lemp: Creating forwarded port mapping for communicator (SSH, WinRM, etc) (host port 3487)
+==> virtualbox-iso.ubu_lemp: Starting the virtual machine...
+==> virtualbox-iso.ubu_lemp: Waiting 3s for boot...
+==> virtualbox-iso.ubu_lemp: Typing the boot command...
+==> virtualbox-iso.ubu_lemp: Using SSH communicator to connect: 127.0.0.1
+==> virtualbox-iso.ubu_lemp: Waiting for SSH to become available...
+==> virtualbox-iso.ubu_lemp: Connected to SSH!
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox version info (6.1.32)
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox guest additions ISO...
+==> virtualbox-iso.ubu_lemp: Gracefully halting virtual machine...
+==> virtualbox-iso.ubu_lemp: [sudo] password for vagrant:
+==> virtualbox-iso.ubu_lemp: Preparing to export machine...
+    virtualbox-iso.ubu_lemp: Deleting forwarded port mapping for the communicator (SSH, WinRM, etc) (host port 3487)
+==> virtualbox-iso.ubu_lemp: Exporting virtual machine...
+    virtualbox-iso.ubu_lemp: Executing: export ubu-lemp --output output-ubu_lemp/ubu-lemp.ovf
+==> virtualbox-iso.ubu_lemp: Cleaning up floppy disk...
+==> virtualbox-iso.ubu_lemp: Deregistering and deleting VM...
+Build 'virtualbox-iso.ubu_lemp' finished after 26 minutes 26 seconds.
+
+==> Wait completed after 26 minutes 26 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> virtualbox-iso.ubu_lemp: VM files in directory: output-ubu_lemp
+
+
+
+Отлично. Мы снова получили на выходе ova файл, который можем импортировать в virtualbox.
+
+Это все безсмысленные образы т.к. там нет установленных пакетов.
+Далее, мы сделаем же уже полезный образ.
+
+
+
+-----------------------------------------------------------------------------------
+БОНУС:
+
+В директории с проектом есть файл - full.json. Это тот же файл что и full.pkr.hcl,
+только в json формате.
+
+Так же есть файл - full_2004.pkr.hcl. Это пример для Ubuntu 20.04. Оличия только
+в boot_command.
+-----------------------------------------------------------------------------------

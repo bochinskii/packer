@@ -1,0 +1,918 @@
+
+---------------------------------------------
+
+Создание Vagrant box с помощью packer (Live Server)
+
+----------------------------------------------
+
+Займемся созданием vagrantbox. Будем использовать все тот же Ubuntu-20.04-live-server.
+
+Создадим директоию, в которой будут тестовые странички сайта и конфиг nginx сервера.
+# mkdir files
+
+# echo "<h1>This is test page</h1>" > files/index.html
+
+# echo "<?php phpinfo(); ?>" > files/info.php
+
+# nano files/default.conf
+
+********************************
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name _;
+  root /var/www/html/;
+  index index.php index.html index.htm index.nginx-debian.html;
+
+  location / {
+    try_files $uri $uri/ /index.php;
+  }
+
+  location ~ \.php$ {
+    fastcgi_pass unix:/run/php/php7.4-fpm.sock;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    include fastcgi_params;
+    include snippets/fastcgi-php.conf;
+  }
+
+ # A long browser cache lifetime can speed up repeat visits to your page
+  location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+       access_log        off;
+       log_not_found     off;
+       expires           360d;
+  }
+
+  # disable access to hidden files
+  location ~ /\.ht {
+      access_log off;
+      log_not_found off;
+      deny all;
+  }
+}
+
+
+********************************
+
+Настраивать операционную систему будем с помощью ansible.
+
+# mkdir provisioning
+
+# nano provisioning/playbook.yml
+
+************************************
+
+---
+
+- name: LEMP
+  hosts: default
+  become: true
+
+  vars:
+    source_folder: ../files
+    destination_content_folder: /var/www/html
+    destination_config_folder: /etc/nginx/conf.d
+
+  tasks:
+
+  - name: install Nginx
+    apt:
+      pkg: nginx
+      force_apt_get: yes
+      update_cache: yes
+
+  - name: Enable service Nginx and ensure it is not masked
+    systemd:
+      name: nginx
+      enabled: yes
+      masked: no
+      state: started
+
+  - name: Change ownerships for /var/www/html
+    file:
+      path: "{{ item }}"
+      owner: www-data
+      group: www-data
+      state: directory
+      recurse: yes
+    with_items:
+      - /usr/share/nginx/html
+      - /var/www/html
+
+  - name: install Mariadb
+    apt:
+      pkg:
+      - mariadb-server
+      - mariadb-client
+      force_apt_get: yes
+      update_cache: yes
+
+  - name: Enable service Mariadb and ensure it is not masked
+    systemd:
+      name: mariadb
+      enabled: yes
+      masked: no
+      state: started
+    notify: "Restart Nginx"
+
+  - name: install PHP
+    apt:
+      pkg: "{{ item }}"
+      force_apt_get: yes
+      update_cache: yes
+    with_items:
+      - php7.4
+      - php7.4-fpm
+      - php7.4-mysql
+      - php-common
+      - php7.4-cli
+      - php7.4-common
+      - php7.4-json
+      - php7.4-opcache
+      - php7.4-readline
+      - php7.4-mbstring
+      - php7.4-xml
+      - php7.4-gd
+      - php7.4-curl
+
+  - name: Enable service PHP and ensure it is not masked
+    systemd:
+      name: php7.4-fpm
+      enabled: yes
+      masked: no
+      state: started
+    notify:
+      - "Restart MariaDB"
+      - "Restart Nginx"
+
+  - name: Copy index.html and info.php
+    copy:
+      src: "{{ source_folder }}/{{ item }}"
+      dest: "{{ destination_content_folder }}/{{ item }}"
+      owner: www-data
+      group: www-data
+    with_items:
+      - index.html
+      - info.php
+
+  - name: Remove default nginx file
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Copy default.conf file to nginx conf.d directory
+    copy:
+      src: "{{ source_folder }}/default.conf"
+      dest: "{{ destination_config_folder }}/default.conf"
+      owner: root
+      group: root
+    notify: "Restart Nginx"
+
+  handlers:
+
+    - name: Restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: Restart PHP
+      systemd:
+        name: php7.4-fpm
+        state: restarted
+
+    - name: Restart MariaDB
+      systemd:
+        name: mariadb
+        state: restarted
+
+
+************************************
+
+Для работы vagrantbox нужно поместить публичный ключ для vagrant полшьзователя. Мы этот ключ доставим в опреционную систему с помощью data-user файла (позже увидим)
+
+# mkdir keys
+
+# curl -k https://raw.githubusercontent.com/hashicorp/vagrant/main/keys/vagrant.pub -o ./keys/vagrant.pub
+
+Теперь покажем user-data файл
+
+# nano http/user-data
+
+***************************************
+
+#cloud-config
+autoinstall:
+  version: 1
+  updates: security
+  early-commands:
+    # workaround to stop ssh for packer as it thinks it timed out
+    - 'sudo systemctl stop ssh'
+  locale: en_US.UTF8
+  keyboard:
+    layout: en
+    variant: us
+  apt:
+    geoip: true
+    preserve_sources_list: false
+    primary:
+    - arches: [amd64, i386]
+      uri: http://mirror.yandex.ru/ubuntu
+    - arches: [default]
+      uri: http://ports.ubuntu.com/ubuntu-ports
+  # packages: [open-vm-tools, openssh-server, net-tools, open-iscsi, ntp, curl, ifupdown, zip, unzip, gnupg2, software-properties-common, apt-transport-https, ca-certificates, lsb-release, python3-pip, jq]
+  network:
+    network:
+      version: 2
+      ethernets:
+        enp0s3:
+          dhcp4: true
+  storage:
+    config:
+      # Disk settings
+      - type: disk
+        id: disk-sda
+        path: /dev/sda
+        ptable: gpt
+        grub_device: true
+        preserve: false
+        wipe: superblock-recursive
+      # Partition Settings
+      - id: partition-0
+        type: partition
+        device: disk-sda
+        number: 1
+        grub_device: false
+        preserve: false
+        flag: bios_grub
+        size: 1M
+      - id: partition-1
+        type: partition
+        device: disk-sda
+        number: 2
+        grub_device: false
+        preserve: false
+        flag: ''
+        wipe: superblock
+        size: 1G
+      - id: partition-2
+        type: partition
+        device: disk-sda
+        number: 3
+        grub_device: false
+        preserve: false
+        flag: swap
+        wipe: superblock
+        size: 2G
+      - id: partition-3
+        type: partition
+        device: disk-sda
+        number: 4
+        grub_device: false
+        preserve: false
+        flag: ''
+        wipe: superblock
+        size: -1
+      # Volumes settings
+      - id: format-0
+        type: format
+        volume: partition-1
+        fstype: ext4
+        preserve: false
+      - id: format-1
+        type: format
+        volume: partition-2
+        fstype: swap
+        preserve: false
+      - id: format-2
+        type: format
+        volume: partition-3
+        fstype: ext4
+        preserve: false
+      # Mount settings
+      - id: mount-0
+        type: mount
+        device: format-0
+        path: /boot
+      - id: mount-1
+        type: mount
+        device: format-1
+        path: ''
+      - id: mount-2
+        type: mount
+        device: format-2
+        path: /
+    swap:
+      swap: 0
+  identity:
+    hostname: ubu-lemp
+    realname: vagrant
+    username: vagrant
+    password: $6$rounds=4096$WxohwVom$xX7iFwTyLLymgruahOYkOLVPNxbIZV2ppNgl9lemjeuYLVJAplftyZ/6lbNrHPqW2/dfEO2ptwdVJ2EazDnv70
+  ssh:
+    allow-pw: true
+    install-server: true
+    # Add public key
+    authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKLv6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyiYJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ== vagrant insecure public key
+  user-data:
+    timezone: Europe/Moscow
+  # General vagrant settings
+  late-commands:
+    - "echo 'Defaults:vagrant !requiretty' > /target/etc/sudoers.d/vagrant"
+    - "echo 'vagrant ALL=(ALL) NOPASSWD: ALL' >> /target/etc/sudoers.d/vagrant"
+    - "chmod 440 /target/etc/sudoers.d/vagrant"
+
+
+***************************************
+
+Тут, важное изменение - # Add public key. Так же блок - # General vagrant settings. Тут дополнительно описывать ничего не надо и так понятно.
+
+Ну, теперь наш paker файл
+
+Создадим папку в которую мы поместим наш box файл.
+
+# mkdir builds
+
+# nano lemp.pkr.hcl
+
+************************************
+
+variables {
+  v_ssh_username = "vagrant"
+  v_ssh_password = "vagrant"
+  v_iso_url = "http://releases.ubuntu.com/20.04.3/ubuntu-20.04.3-live-server-amd64.iso"
+  v_iso_checksum = "sha256:f8e3086f3cea0fb3fefb29937ab5ed9d19e767079633960ccb50e76153effc98"
+}
+
+
+source "virtualbox-iso" "ubu_lemp" {
+
+  # See all types - "VBoxManage list ostypes | grep ubuntu"
+  guest_os_type = "Ubuntu_64"
+
+  iso_url = "${var.v_iso_url}"
+  iso_checksum =  "${var.v_iso_checksum}"
+
+  ssh_username = "${var.v_ssh_username}"
+  ssh_password = "${var.v_ssh_password}"
+  ssh_port = "22"
+  ssh_wait_timeout = "30m"
+
+  guest_additions_path = "VBoxGuestAdditions_{{.Version}}.iso"
+  virtualbox_version_file = ".vbox_version"
+
+  shutdown_command = "echo \"vagrant\" | sudo -S systemctl poweroff"
+  shutdown_timeout = "1m"
+
+  firmware = "bios"
+  disk_size = "60000"
+  hard_drive_interface = "sata"
+  nic_type = "82543GC"
+
+  vm_name = "ubu-lemp"
+
+  cpus = "6"
+  memory = "4096"
+  sound = "none"
+  usb = false
+
+  boot_wait = "5s"
+  headless = false
+
+  http_directory = "./http"
+  boot_command = [
+    "<enter><enter><f6><esc><wait>",
+    "autoinstall ds=nocloud-net;seedfrom=http://{{.HTTPIP}}:{{.HTTPPort}}/",
+    "<enter>"
+  ]
+
+}
+
+build {
+
+  sources = ["sources.virtualbox-iso.ubu_lemp"]
+
+   provisioner "ansible" {
+     playbook_file = "./provisioning/playbook.yml"
+   }
+
+  post-processor "vagrant" {
+    output = "./builds/{{.Provider}}-ubuntu2004.box"
+  }
+
+}
+
+************************************
+
+Тут мы решили использовать переменные. Ну и добавился блок - provisioner, в качеств екоторого выступает ansible. Так же блок - post-processor.
+Как раз есть vagrant процессор, который создает box файл.
+
+Все, запускаем.
+
+# packer build lemp.pkr.hcl
+virtualbox-iso.ubu_lemp: output will be in this color.
+
+==> virtualbox-iso.ubu_lemp: Cannot find "Default Guest Additions ISO" in vboxmanage output (or it is empty)
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions checksums
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.26/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.26/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.26/SHA256SUMS => /home/denisb/.cache/packer/b8316640e9c436fc7db59c73e197f33ce7e34cc8
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.26/VBoxGuestAdditions_6.1.26.iso
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.26/VBoxGuestAdditions_6.1.26.iso?checksum=22d02ec417cd7723d7269dbdaa71c48815f580c0ca7a0606c42bd623f84873d7
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.26/VBoxGuestAdditions_6.1.26.iso?checksum=22d02ec417cd7723d7269dbdaa71c48815f580c0ca7a0606c42bd623f84873d7 => /home/denisb/.cache/packer/2d92aa1b086b7dac77e9aab839ca533b3420e82f.iso
+==> virtualbox-iso.ubu_lemp: Retrieving ISO
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/20.04.3/ubuntu-20.04.3-live-server-amd64.iso
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/20.04.3/ubuntu-20.04.3-live-server-amd64.iso?checksum=sha256%3Af8e3086f3cea0fb3fefb29937ab5ed9d19e767079633960ccb50e76153effc98
+==> virtualbox-iso.ubu_lemp: http://releases.ubuntu.com/20.04.3/ubuntu-20.04.3-live-server-amd64.iso?checksum=sha256%3Af8e3086f3cea0fb3fefb29937ab5ed9d19e767079633960ccb50e76153effc98 => /home/denisb/.cache/packer/62850188884fff34d447798ebc9d9b22bf1f3f1f.iso
+==> virtualbox-iso.ubu_lemp: Starting HTTP server on port 8869
+==> virtualbox-iso.ubu_lemp: Creating virtual machine...
+==> virtualbox-iso.ubu_lemp: Creating hard drive output-ubu_lemp/ubu-lemp.vdi with size 60000 MiB...
+==> virtualbox-iso.ubu_lemp: Mounting ISOs...
+    virtualbox-iso.ubu_lemp: Mounting boot ISO...
+==> virtualbox-iso.ubu_lemp: Creating forwarded port mapping for communicator (SSH, WinRM, etc) (host port 3601)
+==> virtualbox-iso.ubu_lemp: Starting the virtual machine...
+==> virtualbox-iso.ubu_lemp: Waiting 5s for boot...
+==> virtualbox-iso.ubu_lemp: Typing the boot command...
+==> virtualbox-iso.ubu_lemp: Using SSH communicator to connect: 127.0.0.1
+==> virtualbox-iso.ubu_lemp: Waiting for SSH to become available...
+==> virtualbox-iso.ubu_lemp: Connected to SSH!
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox version info (6.1.26)
+==> virtualbox-iso.ubu_lemp: Uploading VirtualBox guest additions ISO...
+==> virtualbox-iso.ubu_lemp: Provisioning with Ansible...
+    virtualbox-iso.ubu_lemp: Setting up proxy adapter for Ansible....
+==> virtualbox-iso.ubu_lemp: Executing Ansible: ansible-playbook -e packer_build_name="ubu_lemp" -e packer_builder_type=virtualbox-iso -e packer_http_addr=10.0.2.2:8869 --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key2317784376 -i /tmp/packer-provisioner-ansible524619478 /packer/lemp/provisioning/playbook.yml
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: PLAY [LEMP] ********************************************************************
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Gathering Facts] *********************************************************
+    virtualbox-iso.ubu_lemp: ok: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [install Nginx] ***********************************************************
+    virtualbox-iso.ubu_lemp: changed: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Enable service Nginx and ensure it is not masked] ************************
+    virtualbox-iso.ubu_lemp: ok: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Change ownerships for /var/www/html] *************************************
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=/usr/share/nginx/html)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=/var/www/html)
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [install Mariadb] *********************************************************
+    virtualbox-iso.ubu_lemp: changed: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Enable service Mariadb and ensure it is not masked] **********************
+    virtualbox-iso.ubu_lemp: ok: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [install PHP] *************************************************************
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-fpm)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-mysql)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php-common)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php7.4-cli)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php7.4-common)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php7.4-json)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php7.4-opcache)
+    virtualbox-iso.ubu_lemp: ok: [default] => (item=php7.4-readline)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-mbstring)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-xml)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-gd)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=php7.4-curl)
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Enable service PHP and ensure it is not masked] **************************
+    virtualbox-iso.ubu_lemp: ok: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Copy index.html and info.php] ********************************************
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=index.html)
+    virtualbox-iso.ubu_lemp: changed: [default] => (item=info.php)
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Remove default nginx file] ***********************************************
+    virtualbox-iso.ubu_lemp: changed: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: TASK [Copy default.conf file to nginx conf.d directory] ************************
+    virtualbox-iso.ubu_lemp: changed: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: RUNNING HANDLER [Restart Nginx] ************************************************
+    virtualbox-iso.ubu_lemp: changed: [default]
+    virtualbox-iso.ubu_lemp:
+    virtualbox-iso.ubu_lemp: PLAY RECAP *********************************************************************
+    virtualbox-iso.ubu_lemp: default                    : ok=12   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+    virtualbox-iso.ubu_lemp:
+==> virtualbox-iso.ubu_lemp: Gracefully halting virtual machine...
+==> virtualbox-iso.ubu_lemp: Preparing to export machine...
+    virtualbox-iso.ubu_lemp: Deleting forwarded port mapping for the communicator (SSH, WinRM, etc) (host port 3601)
+==> virtualbox-iso.ubu_lemp: Exporting virtual machine...
+    virtualbox-iso.ubu_lemp: Executing: export ubu-lemp --output output-ubu_lemp/ubu-lemp.ovf
+==> virtualbox-iso.ubu_lemp: Cleaning up floppy disk...
+==> virtualbox-iso.ubu_lemp: Deregistering and deleting VM...
+==> virtualbox-iso.ubu_lemp: Running post-processor:  (type vagrant)
+==> virtualbox-iso.ubu_lemp (vagrant): Creating a dummy Vagrant box to ensure the host system can create one correctly
+==> virtualbox-iso.ubu_lemp (vagrant): Creating Vagrant box for 'virtualbox' provider
+    virtualbox-iso.ubu_lemp (vagrant): Copying from artifact: output-ubu_lemp/ubu-lemp-disk001.vmdk
+    virtualbox-iso.ubu_lemp (vagrant): Copying from artifact: output-ubu_lemp/ubu-lemp.ovf
+    virtualbox-iso.ubu_lemp (vagrant): Renaming the OVF to box.ovf...
+    virtualbox-iso.ubu_lemp (vagrant): Compressing: Vagrantfile
+    virtualbox-iso.ubu_lemp (vagrant): Compressing: box.ovf
+    virtualbox-iso.ubu_lemp (vagrant): Compressing: metadata.json
+    virtualbox-iso.ubu_lemp (vagrant): Compressing: ubu-lemp-disk001.vmdk
+Build 'virtualbox-iso.ubu_lemp' finished after 26 minutes 9 seconds.
+
+==> Wait completed after 26 minutes 9 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> virtualbox-iso.ubu_lemp: 'virtualbox' provider box: ./builds/virtualbox-ubuntu2004.box
+
+
+По поводу ansible. Тут можно заметить, что мы написали только playbook и все. Не указывали inventory файл. Дело в том, что тут этого не нужно.
+Packer делает это автоматически. В выводе вы можете заметить вот такие строчки
+
+...
+ansible-playbook -e packer_build_name="ubu_lemp" -e packer_builder_type=virtualbox-iso -e packer_http_addr=10.0.2.2:8869 --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key2317784376 -i /tmp/packer-provisioner-ansible524619478 /packer/lemp/provisioning/playbook.yml
+...
+
+Вот поэтому кроме как playbook нам ничего и не нужно.
+
+Далее можно протестировать box файл.
+
+# vagrant box add builds/virtualbox-ubuntu2004.box --name lemp-ubuntu
+
+==> box: Box file was not detected as metadata. Adding it directly...
+==> box: Adding box 'lemp-ubuntu' (v0) for provider:
+    box: Unpacking necessary files from: file:///packer/lemp/builds/virtualbox-ubuntu2004.box
+==> box: Successfully added box 'lemp-ubuntu' (v0) for 'virtualbox'!
+
+
+# nano Vagrantfile
+
+*********************************
+
+Vagrant.configure("2") do |config|
+
+   config.vm.box = "lemp-ubuntu"
+
+
+   config.vm.network "forwarded_port",
+     guest: 80,
+     host: 8080,
+     host_ip: "127.0.0.1"
+
+   config.vm.provider "virtualbox" do |vb|
+     # Display the VirtualBox GUI when booting the machine
+     vb.gui = false
+     vb.name = "my_vm"
+     # Customize the amount of memory on the VM:
+     vb.memory = "2048"
+     vb.cpus = "2"
+   end
+
+end
+
+
+********************************
+
+# vagrant up
+
+Bringing machine 'default' up with 'virtualbox' provider...
+==> default: Importing base box 'lemp-ubuntu'...
+==> default: Matching MAC address for NAT networking...
+==> default: Setting the name of the VM: my_vm
+==> default: Clearing any previously set network interfaces...
+==> default: Preparing network interfaces based on configuration...
+    default: Adapter 1: nat
+==> default: Forwarding ports...
+    default: 80 (guest) => 8080 (host) (adapter 1)
+    default: 22 (guest) => 2222 (host) (adapter 1)
+==> default: Running 'pre-boot' VM customizations...
+==> default: Booting VM...
+==> default: Waiting for machine to boot. This may take a few minutes...
+    default: SSH address: 127.0.0.1:2222
+    default: SSH username: vagrant
+    default: SSH auth method: private key
+    default:
+    default: Vagrant insecure key detected. Vagrant will automatically replace
+    default: this with a newly generated keypair for better security.
+    default:
+    default: Inserting generated public key within guest...
+    default: Removing insecure key from the guest if it's present...
+    default: Key inserted! Disconnecting and reconnecting using new SSH key...
+==> default: Machine booted and ready!
+==> default: Checking for guest additions in VM...
+==> default: Mounting shared folders...
+    default: /vagrant => /packer/lemp
+
+# curl -I 127.0.0.1:8080
+HTTP/1.1 200 OK
+Server: nginx/1.18.0 (Ubuntu)
+Date: Sun, 31 Oct 2021 06:49:54 GMT
+Content-Type: text/html
+Content-Length: 27
+Last-Modified: Sun, 31 Oct 2021 06:37:37 GMT
+Connection: keep-alive
+ETag: "617e39b1-1b"
+Accept-Ranges: bytes
+
+# url -I 127.0.0.1:8080/info.php
+HTTP/1.1 200 OK
+Server: nginx/1.18.0 (Ubuntu)
+Date: Sun, 31 Oct 2021 06:53:03 GMT
+Content-Type: text/html; charset=UTF-8
+Connection: keep-alive
+
+Вот что должно быть в рабочей папке
+
+# tree
+
+├── builds
+│   └──virtualbox-ubuntu2004.box
+├── files
+│   ├── default.conf
+│   ├── index.html
+│   └── info.php
+├── http
+│   ├── meta-data
+│   └── user-data
+├── keys
+│   └── vagrant.pub
+├── lemp.pkr.hcl
+├── provisioning
+│   └── playbook.yml
+└── Vagrantfile
+
+-------------
+
+БОНУС.
+
+-------------
+
+Не всегда хорошо пароль и имя пользователя указывать в packer файле (как у нас).
+Для этих целей используются enviroment переменные.
+
+Вот пример
+
+# export V_SSH_USERNAME=vagrant && export V_SSH_PASSWORD=vagrant
+
+# env | grep V_
+V_SSH_PASSWORD=vagrant
+V_SSH_USERNAME=vagrant
+
+nano lemp.pkr.hcl
+
+*************************
+
+variables {
+   v_ssh_username = "${env("V_SSH_USERNAME")}"
+   v_ssh_password = "${env("V_SSH_PASSWORD")}"
+}
+
+source "virtualbox-iso" "ubu_lemp" {
+  ssh_username = "${var.v_ssh_username}"
+  ssh_password = "${var.v_ssh_password}"
+}
+
+*************************
+
+Кстати, проверить видил ли packer переменные можно таким образом (удобно для troubleshooting)
+
+# packer console lemp.pkr.hcl
+> variables
+> > input-variables:
+
+var.v_iso_checksum: "sha256:f8e3086f3cea0fb3fefb29937ab5ed9d19e767079633960ccb50e76153effc98"
+var.v_iso_url: "http://releases.ubuntu.com/20.04.3/ubuntu-20.04.3-live-server-amd64.iso"
+var.v_ssh_password: "vagrant"
+var.v_ssh_username: "vagrant"
+
+
+---------------------------------------------
+
+Создание Vagrant box с помощью packer (Legacy Server)
+
+----------------------------------------------
+
+Тут мы просто приведем конфиги т.к. по сути мало что изменяется.
+
+# nano lemp_legacy.pkr.hcl
+
+************************************************
+
+
+source "virtualbox-iso" "ubu_lemp" {
+
+  # See all types - "VBoxManage list ostypes | grep ubuntu"
+  guest_os_type = "Ubuntu_64"
+
+  iso_url = "http://cdimage.ubuntu.com/ubuntu-legacy-server/releases/20.04/release/ubuntu-20.04.1-legacy-server-amd64.iso"
+  iso_checksum =  "sha256:f11bda2f2caed8f420802b59f382c25160b114ccc665dbac9c5046e7fceaced2"
+
+  ssh_username = "vagrant"
+  ssh_password = "vagrant"
+  ssh_port = "22"
+  ssh_wait_timeout = "30m"
+
+  guest_additions_path = "VBoxGuestAdditions_{{.Version}}.iso"
+  virtualbox_version_file = ".vbox_version"
+
+  shutdown_command = "echo \"vagrant\" | sudo -S systemctl poweroff"
+  shutdown_timeout = "1m"
+
+  firmware = "bios"
+  disk_size = "60000"
+  hard_drive_interface = "sata"
+  nic_type = "82543GC"
+
+  vm_name = "ubu-lemp"
+
+  cpus = "6"
+  memory = "4096"
+  sound = "none"
+  usb = false
+
+  boot_wait = "5s"
+  headless = false
+
+  http_directory = "./http"
+  boot_command = [
+    "<esc><wait1s>",
+    "<esc><wait1s>",
+    "<enter><wait1s>",
+    "/install/vmlinuz",
+    " initrd=/install/initrd.gz",
+    " auto-install/enable=true",
+    " debconf/priority=critical",
+    " preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg",
+    " netcfg/get_hostname=ubu-lemp<wait1s>",
+    " -- <wait1s>",
+    "<enter><wait1s>"
+  ]
+
+}
+
+build {
+
+  sources = ["sources.virtualbox-iso.ubu_lemp"]
+
+  provisioner "file" {
+    pause_before = "5s"
+    source = "./keys/vagrant.pub"
+    destination = "/tmp/authorized_keys"
+  }
+
+  provisioner "shell" {
+    pause_before = "5s"
+    inline = [
+      "mkdir /home/vagrant/.ssh",
+      "cp /tmp/authorized_keys /home/vagrant/.ssh/authorized_keys",
+      "sudo chown -R vagrant:vagrant /home/vagrant/.ssh"
+    ]
+  }
+
+   provisioner "ansible" {
+     playbook_file = "./provisioning/playbook.yml"
+   }
+  }
+
+  post-processor "vagrant" {
+    output = "./builds/{{.Provider}}-ubuntu2004.box"
+  }
+
+}
+
+***********************************************
+
+Тут с помощью provision file мы копируем публичный ключ в tmp директорию виртуальной машины (только таким образом оно работает), а далее
+с помощью shell данный ключ направляем в папку пользователя vagrant. Ну, все остальное делается с помощью playbook.
+
+# nano http/preseed.cfg
+
+********************************
+
+# Locales
+d-i debian-installer/locale string en_US.UTF-8
+d-i localechooser/supported-locales multiselect en_US.UTF-8, ru_RU.UTF-8
+# d-i debian-installer/language string en
+# d-i debian-installer/country string RU
+# d-i debian-installer/locale string en_US.UTF-8
+# d-i localechooser/supported-locales multiselect en_US.UTF-8, ru_RU.UTF-8
+
+# Keyboard
+d-i console-setup/ask_detect boolean false
+d-i keyboard-configuration/layoutcode string us
+d-i keyboard-configuration/modelcode string pc105
+d-i keyboard-configuration/xkb-keymap select us
+d-i	console-setup/toggle	select	Ctrl+Shift
+
+# Network
+d-i netcfg/enable boolean true
+d-i netcfg/choose_interface select auto
+d-i netcfg/link_wait_timeout string 10
+d-i netcfg/dhcp_timeout string 15
+d-i netcfg/dhcpv6_timeout string 15
+d-i hw-detect/load_firmware boolean true
+
+
+# Mirrors
+d-i mirror/protocol string http
+d-i mirror/country string manual
+d-i mirror/http/hostname string http://mirror.yandex.ru
+d-i mirror/http/directory string /ubuntu
+d-i mirror/http/proxy string
+
+# Account Setup
+d-i passwd/root-login boolean true
+d-i passwd/make-user boolean true
+d-i passwd/root-password password vagrant
+d-i passwd/root-password-again password vagrant
+d-i passwd/user-fullname string vagrant
+d-i passwd/user-uid string 900
+d-i passwd/username string vagrant
+d-i passwd/user-password password vagrant
+d-i passwd/user-password-again password vagrant
+d-i user-setup/allow-password-weak boolean true
+d-i passwd/user-default-groups string vagrant sudo
+d-i user-setup/encrypt-home boolean false
+
+
+# Clock and time zone setup
+d-i clock-setup/utc boolean true
+d-i time/zone string Europe/Moscow
+d-i clock-setup/ntp boolean false
+
+# Partitioning and mounting
+d-i partman-auto/disk string /dev/sda
+d-i partman-auto/method string regular
+d-i partman-auto/expert_recipe string root-recipe :: \
+    512 1 1024 ext3                                  \
+    $primary{ } $bootable{ } method{ format }        \
+    format{ } use_filesystem{ } filesystem{ ext3 }   \
+    mountpoint{ /boot }                              \
+    .                                                \
+    1024 2 2048 linux-swap                           \
+    $primary{ } method{ swap } format{ }             \
+    .                                                \
+    1024 3 1000000000 ext4                           \
+    $primary{ } method{ format } format{ }           \
+    use_filesystem{ } filesystem{ ext4 }             \
+    mountpoint{ / }                                  \
+    .                                                \
+d-i partman-auto/choose_recipe select root-recipe
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i partman/mount_style select traditional
+d-i partman/confirm_write_new_label boolean true
+
+# Base system installation
+# d-i base-installer/kernel/image string linux-generic
+d-i base-installer/kernel/override-image string linux-server
+
+# apt Setup
+d-i apt-setup/restricted boolean true
+d-i apt-setup/universe boolean true
+d-i apt-setup/backports boolean true
+
+# Package selection
+tasksel tasksel/first multiselect standard, ubuntu-server
+d-i pkgsel/include string openssh-server cryptsetup build-essential libssl-dev libreadline-dev zlib1g-dev linux-source dkms nfs-common
+d-i pkgsel/language-packs multiselect en
+d-i pkgsel/update-policy select unattended-upgrades
+d-i pkgsel/upgrade select full-upgrade
+d-i pkgsel/install-language-support boolean false
+
+# Boot loader installation
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean true
+d-i grub-installer/bootdev string /dev/sda
+
+# Finishing up
+d-i finish-install/reboot_in_progress note
+
+# Vagrant Settings
+d-i preseed/late_command string \
+echo 'Defaults:vagrant !requiretty' > /target/etc/sudoers.d/vagrant; \
+echo 'vagrant ALL=(ALL) NOPASSWD: ALL' >> /target/etc/sudoers.d/vagrant; \
+chmod 440 /target/etc/sudoers.d/vagrant;
+
+********************************
+
+Тут, коснулись изменения в # Package selection.
+Мы дополнительно поставили все необходимое для vagrant box (cryptsetup build-essential libssl-dev libreadline-dev zlib1g-dev linux-source dkms nfs-common).
+Так же появились дополнительные настройки для vagrant пользователя - # Vagrant Settings.
+
+Ну, а все остальное как и в Live Server так что приводить не будем.
+
+Вот какие каталоги нужно в рабочей директории
+# tree
+.
+├── builds
+├── files
+│   ├── default.conf
+│   ├── index.html
+│   └── info.php
+├── http
+│   └── preseed.cfg
+├── keys
+│   └── vagrant.pub
+├── lemp_legacy.pkr.hcl
+├── provisioning
+│   └── playbook.yml

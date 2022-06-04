@@ -1,0 +1,121 @@
+------------------------------------------
+
+Попытка создания безсмысленного образа
+
+------------------------------------------
+
+Мы познакомимся с packer путем создания образа операционной системы на virtualbox.
+
+Первая попытка у нас не удасться т.к. мы не допишем до конца код. Т.е. по факту
+мы сможем создать виртуальную машину, а далее все завершится с ошибкой.
+
+Это сделано для того, чтобы показать некоторые не совсем очевидные вещи.
+
+Далее, мы будем рассматривать примеры создания на AWS, там будет понятней.
+
+Начнем.
+
+$ mkdir -p ./simple_image && cd ./simple_image
+
+$ mkdir ./http
+
+Packer работает с json файлами или hcl (hashi corp language). Последний становится
+более предпрочтительным, так что мы будем писать не нем.
+
+Заметим, что имя должно быть по такому шаблону - *.pkr.hcl
+
+Создадим simple.pkr.hcl. С его созедержимым можно ознакомится в директории с проектом.
+
+
+
+Опишем
+
+
+В данном примере мы использовали только - build. Т.е. мы не конфигурировали
+(не устанавливали пакеты) и не делали файл образа (ova или box).
+
+Тут особо нечего описывать т.к. многое понятно.
+
+shutdown_command - нужна для того, чтобы выключить ОС, а не дать это сделать packer'у.
+Дело в том, что packer выключает "жестко" ОС, а это не есть хорошо.
+
+shutdown_timeout - указывает максимальное время, когда packer сам выключить ОС,
+если вдруг команда - shutdown_command не прошла.
+
+Но это не интересно. Это все можно найти в документации. Тут есть более интересная штука.
+http_directory - это директория, к котором будет привязан временный web сервер, который создает packer.
+С помощью него мы будем отдавать файл ответов при установки ОС.
+
+Так же, на данный момент нас интересует - boot_command.
+Данный параметр эмулирует ваши нажатия на клавиатуру при загрузки с iso файла.
+
+Чтобы автоматически настроить ОС при ее установки нам нужно зайти в загрузочное меню  ISO файла.
+Это можно сделать как раз с помощью параметра - boot_command.
+
+Мы при загрузке системы понажимали несколько раз - esc, потом нажали - e.
+Удалили, что было в окне и написали вот эту строчку
+
+"This is future LEMP image" и нажали - ENTER.
+
+Это бесмысленные действия, мы их проделали лишь для того, чтобы понять как это работает.
+В следующем разделе, мы произведем загрузку всего необходимого для автоматической установки ОС,
+как раз используя загрузочное меню.
+
+Проверим наш код
+
+$ packer validate simple.pkr.hcl
+
+The configuration is valid.
+
+Выполним
+
+$ packer build simple.pkr.hcl
+
+virtualbox-iso.ubu_lemp: output will be in this color.
+
+==> virtualbox-iso.ubu_lemp: Cannot find "Default Guest Additions ISO" in vboxmanage output (or it is empty)
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions checksums
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS
+    virtualbox-iso.ubu_lemp: SHA256SUMS 2.67 KiB / 2.67 KiB [=================================================================================================] 100.00% 0s
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/SHA256SUMS => /home/denisb/.cache/packer/56d34eb5b01d7b6828c02b5976a2042eade3a41e
+==> virtualbox-iso.ubu_lemp: Retrieving Guest additions
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso
+==> virtualbox-iso.ubu_lemp: Trying https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c
+    virtualbox-iso.ubu_lemp: VBoxGuestAdditions_6.1.32.iso 59.50 MiB / 59.50 MiB [============================================================================] 100.00% 9s
+==> virtualbox-iso.ubu_lemp: https://download.virtualbox.org/virtualbox/6.1.32/VBoxGuestAdditions_6.1.32.iso?checksum=3ab8d64c209d89ffc48e71df68ac0da2cf76074579ffaf2dba008ddbef44129c => /home/denisb/.cache/packer/1965a58e0c779c1d2892fb75a492f70fdc04268f.iso
+==> virtualbox-iso.ubu_lemp: Retrieving ISO
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/focal/ubuntu-20.04.4-live-server-amd64.iso
+==> virtualbox-iso.ubu_lemp: Trying http://releases.ubuntu.com/focal/ubuntu-20.04.4-live-server-amd64.iso?checksum=sha256%3A28ccdb56450e643bad03bb7bcf7507ce3d8d90e8bf09e38f6bd9ac298a98eaad
+    virtualbox-iso.ubu_lemp: ubuntu-20.04.4-live-server-amd64.iso 1.24 GiB / 1.24 GiB [====================================================================] 100.00% 3m56s
+==> virtualbox-iso.ubu_lemp: http://releases.ubuntu.com/focal/ubuntu-20.04.4-live-server-amd64.iso?checksum=sha256%3A28ccdb56450e643bad03bb7bcf7507ce3d8d90e8bf09e38f6bd9ac298a98eaad => /home/denisb/.cache/packer/47de2d7266acde194681de2a24f5d76b43b452ca.iso
+==> virtualbox-iso.ubu_lemp: Starting HTTP server on port 8016
+==> virtualbox-iso.ubu_lemp: Creating virtual machine...
+==> virtualbox-iso.ubu_lemp: Creating hard drive output-ubu_lemp/ubu-lemp.vdi with size 60000 MiB...
+==> virtualbox-iso.ubu_lemp: Mounting ISOs...
+    virtualbox-iso.ubu_lemp: Mounting boot ISO...
+==> virtualbox-iso.ubu_lemp: Creating forwarded port mapping for communicator (SSH, WinRM, etc) (host port 2685)
+==> virtualbox-iso.ubu_lemp: Starting the virtual machine...
+==> virtualbox-iso.ubu_lemp: Waiting 2s for boot...
+==> virtualbox-iso.ubu_lemp: Typing the boot command...
+==> virtualbox-iso.ubu_lemp: Using SSH communicator to connect: 127.0.0.1
+==> virtualbox-iso.ubu_lemp: Waiting for SSH to become available...
+
+
+Тут нужно нажать - Ctrl + C, т.к. далее ничего не произойдет. Если, конечно мы
+не будем в окне виртуальной машитны VirtualBox сами проходить шаги установки ОС.
+Но это никому не нужно ибо зачем использовать packer.
+
+Вы наверное уже догадались, что используя параметр - boot_command можно передать
+виртуальной машине нажатия клавиш, чтобы она установилась автоматически.
+И таки - да. Вы правильно догадались, но об этом в следующем разделе.
+
+-----------------------------------------------------------------------------------
+БОНУС:
+
+В директории с проектом есть файл - simple.json. Это тот же файл что и simple.pkr.hcl,
+тольк ов json формате.
+
+Так же есть файл - simple_2004.pkr.hcl. Это пример для Ubuntu 20.04. Оличия только
+в boot_command.
+-----------------------------------------------------------------------------------
