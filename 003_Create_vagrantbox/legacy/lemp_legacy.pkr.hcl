@@ -1,4 +1,4 @@
-source "virtualbox-iso" "ubu_lemp" {
+source "virtualbox-iso" "ubu_lamp" {
 
   # See all types - "VBoxManage list ostypes | grep ubuntu"
   guest_os_type = "Ubuntu_64"
@@ -22,14 +22,14 @@ source "virtualbox-iso" "ubu_lemp" {
   hard_drive_interface = "sata"
   nic_type = "82543GC"
 
-  vm_name = "ubu-lemp"
+  vm_name = "ubu-lamp"
 
   cpus = "6"
   memory = "4096"
   sound = "none"
   usb = false
 
-  boot_wait = "10s"
+  boot_wait = "5s"
   headless = false
 
   http_directory = "./http"
@@ -42,7 +42,7 @@ source "virtualbox-iso" "ubu_lemp" {
     " auto-install/enable=true",
     " debconf/priority=critical",
     " preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg",
-    " netcfg/get_hostname=ubu-lemp<wait1s>",
+    " netcfg/get_hostname=ubu-lamp<wait1s>",
     " -- <wait1s>",
     "<enter><wait1s>"
   ]
@@ -51,6 +51,37 @@ source "virtualbox-iso" "ubu_lemp" {
 
 build {
 
-  sources = ["sources.virtualbox-iso.ubu_lemp"]
+  sources = ["sources.virtualbox-iso.ubu_lamp"]
+
+  provisioner "file" {
+    pause_before = "5s"
+    source = "./keys/vagrant.pub"
+    destination = "/tmp/authorized_keys"
+  }
+
+  provisioner "shell" {
+    pause_before = "5s"
+    inline = [
+      "mkdir /home/vagrant/.ssh",
+      "cp /tmp/authorized_keys /home/vagrant/.ssh/authorized_keys",
+      "sudo chown -R vagrant: /home/vagrant/.ssh"
+    ]
+  }
+
+  provisioner "ansible" {
+    playbook_file = "./provisioning/playbook.yml"
+    ansible_ssh_extra_args = ["-oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedKeyTypes=+ssh-rsa"]
+    ## for debug
+    #extra_arguments = [ "-vv" ]
+    ## if we will use own ssh key
+    #ssh_host_key_file = "./keys/ecdsa"
+    #ssh_authorized_key_file = "./keys/ecdsa.pub"
+    #ansible_env_vars = ["ANSIBLE_HOST_KEY_CHECKING=False"]
+    #extra_arguments = ["-e ansible_ssh_private_key_file=./keys/ecdsa"]
+  }
+
+  post-processor "vagrant" {
+    output = "./builds/{{.Provider}}-ubuntu2004.box"
+  }
 
 }

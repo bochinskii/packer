@@ -18,7 +18,7 @@
       "shutdown_timeout": "1m",
 
       "firmware": "bios",
-      "disk_size": "60000",
+      "disk_size": "12000",
       "nic_type": "82543GC",
 
       "vm_name": "ubu-lemp",

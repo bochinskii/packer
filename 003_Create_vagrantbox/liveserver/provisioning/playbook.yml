@@ -1,0 +1,101 @@
+---
+
+- name: LAMP
+  hosts: default
+  become: true
+
+  vars:
+    source_content_folder: ../files
+    destination_content_folder: /var/www/html
+
+  tasks:
+
+  - name: Install apache2
+    apt:
+      pkg:
+        - apache2
+        - apache2-utils
+      state: latest
+      update_cache: yes
+
+  - name: Copy content
+    copy:
+      src: "{{ source_content_folder }}/{{ item }}"
+      dest: "{{ destination_content_folder }}/{{ item }}"
+    with_items:
+      - index.html
+      - info.php
+
+  - name: Change ownerships for /var/www/html
+    file:
+      path: "{{ destination_content_folder }}"
+      owner: www-data
+      group: www-data
+      state: directory
+      recurse: yes
+
+  - name: Start apache2 server
+    systemd:
+      name: apache2
+      enabled: yes
+      masked: no
+      state: started
+
+  - name: install Mariadb
+    apt:
+      pkg:
+      - mariadb-server
+      - mariadb-client
+      state: latest
+      force_apt_get: yes
+      update_cache: yes
+
+  - name: Enable service Mariadb and ensure it is not masked
+    systemd:
+      name: mariadb
+      enabled: yes
+      masked: no
+      state: started
+    notify:
+    - "Restart_Apache"
+
+  - name: Install PHP
+    apt:
+      pkg:
+       - php8.1
+       - php8.1-fpm
+       - libapache2-mod-php8.1
+       - php8.1-mysql
+       - php-common
+       - php8.1-cli
+       - php8.1-common
+       - php8.1-opcache
+       - php8.1-readline
+       - php8.1-mbstring
+       - php8.1-xml
+       - php8.1-gd
+       - php8.1-curl
+      state: latest
+      update_cache: yes
+
+  - name: Start PHP-FPM server
+    systemd:
+      name: php8.1-fpm
+      enabled: yes
+      masked: no
+      state: started
+    notify:
+    - "Restart_Apache"
+
+
+  handlers:
+
+    - name: Restart_Apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Restart_PHP
+      systemd:
+        name: php8.1-fpm
+        state: restarted

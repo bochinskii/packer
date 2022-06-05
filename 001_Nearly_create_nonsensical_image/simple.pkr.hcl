@@ -13,7 +13,7 @@ source "virtualbox-iso" "ubu_lemp" {
   shutdown_timeout = "1m"
 
   firmware = "bios"
-  disk_size = "60000"
+  disk_size = "12000"
   hard_drive_interface = "sata"
   nic_type = "82543GC"
 

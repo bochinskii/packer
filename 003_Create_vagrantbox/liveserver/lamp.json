@@ -1,0 +1,89 @@
+{
+  "variables": {
+    "_comment": "The First step: export V_SSH_USERNAME=vagrant && export V_SSH_PASSWORD=vagrant",
+    "v_ssh_username": "{{env `V_SSH_USERNAME`}}",
+    "v_ssh_password": "{{env `V_SSH_PASSWORD`}}",
+    "v_iso_url": "http://releases.ubuntu.com/jammy/ubuntu-22.04-live-server-amd64.iso",
+    "v_iso_checksum": "sha256:84aeaf7823c8c61baa0ae862d0a06b03409394800000b3235854a6b38eb4856f"
+  },
+
+  "builders": [
+    {
+      "type": "virtualbox-iso",
+
+      "guest_os_type": "Ubuntu_64",
+
+      "iso_url": "{{user `v_iso_url`}}",
+      "iso_checksum": "{{user `v_iso_checksum`}}",
+
+      "ssh_username": "{{user `v_ssh_username`}}",
+      "ssh_password": "{{user `v_ssh_password`}}",
+      "ssh_port": "22",
+      "ssh_wait_timeout": "60m",
+
+      "guest_additions_path": "VBoxGuestAdditions_{{.Version}}.iso",
+      "virtualbox_version_file": ".vbox_version",
+
+      "shutdown_command": "echo 'vagrant' | sudo -S systemctl poweroff",
+      "shutdown_timeout": "01m",
+
+      "firmware": "bios",
+      "disk_size": "12000",
+      "hard_drive_interface": "sata",
+      "nic_type": "82543GC",
+
+      "vm_name": "ubu-lamp",
+
+      "cpus": "6",
+      "memory": "4096",
+      "sound": "none",
+      "usb": false,
+
+      "boot_wait": "3s",
+      "headless": false,
+
+      "http_directory": "./http",
+      "boot_command": [
+        "<esc><esc><esc><esc>e<wait>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "<del><del><del><del><del><del><del><del>",
+        "linux /casper/vmlinuz --- autoinstall ds=\"nocloud-net;seedfrom=http://{{.HTTPIP}}:{{.HTTPPort}}/\"<enter><wait>",
+        "initrd /casper/initrd<enter><wait>",
+        "boot<enter>",
+        "<enter><f10><wait>"
+      ]
+    }
+
+  ],
+
+  "provisioners": [
+    {
+      "type": "ansible",
+      "pause_before": "10s",
+      "playbook_file": "./provisioning/playbook.yml",
+      "ansible_ssh_extra_args": ["-oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedKeyTypes=+ssh-rsa"],
+    }
+
+  ],
+
+  "post-processors": [
+    {
+      "type": "vagrant",
+      "output": "./builds/{{.Provider}}-ubuntu2004.box"
+    }
+
+  ]
+
+}

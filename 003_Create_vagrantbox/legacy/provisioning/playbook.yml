@@ -1,0 +1,115 @@
+---
+
+- name: LAMP
+  hosts: default
+  become: true
+
+  vars:
+    source_content_folder: ../files
+    destination_content_folder: /var/www/html
+
+  tasks:
+
+  - name: Install apache2
+    apt:
+      pkg:
+        - apache2
+        - apache2-utils
+      state: latest
+      update_cache: yes
+
+  - name: Copy content
+    copy:
+      src: "{{ source_content_folder }}/{{ item }}"
+      dest: "{{ destination_content_folder }}/{{ item }}"
+    with_items:
+      - index.html
+      - info.php
+
+  - name: Change ownerships for /var/www/html
+    file:
+      path: "{{ destination_content_folder }}"
+      owner: www-data
+      group: www-data
+      state: directory
+      recurse: yes
+
+  - name: Start apache2 server
+    systemd:
+      name: apache2
+      enabled: yes
+      masked: no
+      state: started
+
+  - name: install Mariadb
+    apt:
+      pkg:
+      - mariadb-server
+      - mariadb-client
+      state: latest
+      force_apt_get: yes
+      update_cache: yes
+
+  - name: Enable service Mariadb and ensure it is not masked
+    systemd:
+      name: mariadb
+      enabled: yes
+      masked: no
+      state: started
+    notify:
+    - "Restart_Apache"
+
+  - name: Add PHP-FPM Repository
+    apt_repository:
+      validate_certs: no
+      repo: "ppa:ondrej/php"
+      state: present
+
+  - name: Install PHP
+    apt:
+      pkg:
+       - php7.4
+       - php7.4-fpm
+       - libapache2-mod-php7.4
+       - php7.4-mysql
+       - php7.4-common
+       - php7.4-cli
+       - php7.4-opcache
+       - php7.4-readline
+       - php7.4-mbstring
+       - php7.4-xml
+       - php7.4-gd
+       - php7.4-curl
+      state: latest
+      update_cache: yes
+
+  - name: Start PHP-FPM server
+    systemd:
+      name: php7.4-fpm
+      enabled: yes
+      masked: no
+      state: started
+    notify:
+    - "Restart_Apache"
+
+  - name: Apache configuration
+    shell: |
+      a2enmod proxy_fcgi setenvif
+      a2enconf php7.4-fpm
+      exit 0
+    notify:
+    - "Restart_PHP"
+    - "Restart_Apache"
+
+
+  handlers:
+
+    - name: Restart_Apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Restart_PHP
+      systemd:
+        name: php7.4-fpm
+        state: restarted
