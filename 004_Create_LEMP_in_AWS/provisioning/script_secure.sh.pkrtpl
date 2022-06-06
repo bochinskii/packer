@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/usr/bin/sh
 #
 # Hostname
 #
-export HOSTNAME=rocinante.int
+export HOSTNAME=${hostname}
 
 sudo hostnamectl set-hostname $HOSTNAME
 
@@ -15,14 +15,14 @@ sudo yum update -y
 #
 # Timezone
 #
-export TIMEZONE=Europe/Moscow
+export TIMEZONE=${timezone}
 
 sudo timedatectl set-timezone $TIMEZONE
 
 #
 # SSH
 #
-export SSH_PORT=22
+export SSH_PORT=${ssh_port}
 
 sudo sed -i "s/^#Port .*/Port $SSH_PORT/g" /etc/ssh/sshd_config
 sudo systemctl reload sshd
@@ -61,7 +61,7 @@ sudo systemctl start nginx; sudo systemctl enable nginx
 # MYSQL
 #
 # https://dev.mysql.com/get/mysql80-community-release-el7-6.noarch.rpm
-export MYSQL_REPO="https://dev.mysql.com/get/mysql80-community-release-el7-6.noarch.rpm"
+export MYSQL_REPO=${mysql_repo}
 
 sudo yum install $MYSQL_REPO -y
 sudo amazon-linux-extras install epel -y
@@ -70,7 +70,7 @@ sudo yum install --nogpgcheck  mysql-community-server -y
 sudo systemctl start mysqld; sudo systemctl enable mysqld
 
 export MYSQL_TEMP_PASS=`sudo grep 'temporary password' /var/log/mysqld.log | cut -d " " -f13`
-export MYSQL_ROOT_PASS=P@ssw0rd12345
+export MYSQL_ROOT_PASS=${mysql_root_pass}
 
 # Secure installation
 sudo mysql --connect-expired-password -uroot -p$MYSQL_TEMP_PASS \
@@ -85,8 +85,8 @@ sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS -e "FLUSH PRIVIL
 sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS \
 -e "ALTER USER 'root'@'localhost' REQUIRE SSL;"
 
-export MYSQL_ADMIN_USER=admin
-export MYSQL_ADMIN_USER_PASS=P@ssw0rd12345
+export MYSQL_ADMIN_USER=${mysql_admin_user}
+export MYSQL_ADMIN_USER_PASS=${mysql_admin_user_pass}
 
 # Create Admin user
 sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS \
@@ -94,9 +94,9 @@ sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS \
 sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS \
 -e "GRANT ALL PRIVILEGES ON *.* TO '$MYSQL_ADMIN_USER'@'localhost'; FLUSH PRIVILEGES;" --ssl-mode=REQUIRE
 
-export MYSQL_DRUPAL_USER=drupaluser
-export MYSQL_DRUPAL_USER_PASS=P@ssw0rd12345
-export MYSQL_DRUPAL_DB=drupaldb
+export MYSQL_DRUPAL_USER=${mysql_drupal_user}
+export MYSQL_DRUPAL_USER_PASS=${mysql_drupal_user_pass}
+export MYSQL_DRUPAL_DB=${mysql_drupal_db}
 
 # Create Drupal
 sudo mysql --connect-expired-password -u$MYSQL_ADMIN_USER -p$MYSQL_ADMIN_USER_PASS \
@@ -112,8 +112,13 @@ sudo mysql --connect-expired-password -uroot -p$MYSQL_ROOT_PASS \
 sudo amazon-linux-extras enable php8.0
 sudo yum clean metadata
 sudo yum makecache
-sudo yum install php php-fpm php-pdo php-mysqlnd php-xml php-gd php-curl \
-php-mbstring php-json php-common php-gmp php-intl php-gd php-cli php-zip php-opcache -y
+
+%{ for p in pkgs ~}
+sudo yum install ${p} -y
+%{ endfor ~}
+
+#sudo yum install php php-fpm php-pdo php-mysqlnd php-xml php-gd php-curl \
+#php-mbstring php-json php-common php-gmp php-intl php-gd php-cli php-zip php-opcache -y
 
 # PHP-FPM Settings
 sudo chmod 0666 /etc/php-fpm.d/www.conf
@@ -137,15 +142,15 @@ sudo systemctl restart nginx
 sudo mkdir /etc/nginx/tls
 sudo openssl dhparam -out /etc/nginx/tls/dhparam.pem 2048
 
-export SSL_CERT=rocinante.crt
-export SSL_KEY=rocinante.key
+export SSL_CERT=${ssl_cert}
+export SSL_KEY=${ssl_key}
 
 sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/tls/$SSL_KEY -out /etc/nginx/tls/$SSL_CERT -subj "/C=MA/ST= /L=MCR/O= /OU= /CN=rocinante.in"
 
 #
 # Drupal
 #
-export SITE_DIR=/var/www/html/rocinante
+export SITE_DIR=${site_dir}
 
 sudo mkdir -p $SITE_DIR/{www,log}
 sudo curl -Lo /tmp/drupal.tar.gz https://www.drupal.org/download-latest/tar.gz

@@ -1,0 +1,118 @@
+----------------------------
+Создание LEMP образа для AWS
+----------------------------
+
+Создадим AMI с предустановленным LEMP и настройкой базы данных.
+
+https://www.packer.io/plugins/builders/amazon
+
+https://www.packer.io/plugins/builders/amazon/ebs
+
+https://www.packer.io/docs/templates/hcl_templates/functions/file/templatefile
+
+
+Все необходимые конфигурационные файлы находятся в диреткории - configs. Мы данную директорию
+заархивировали - configs.tar.bz. Далее мы скопируем их в образ.
+
+С помощью скрипта - script.sh.pkrtpl мы устанавливаем все необходимые пакеты и делаем
+необходимые настройки для LEMP. Используем функцию templatefile. Как мы это делали в terraform.
+Это повысит безопасность т.к. в скрипте мы не "показываем" переменные, которые хотим скрыть
+(например, пароли).
+
+Со всеми файлами можно ознакомиться в директории с проектом.
+
+
+$ mkdir ./004_Create_LEMP_in_AWS && cd ./004_Create_LEMP_in_AWS
+
+$ mkdir -p ./provisioning/configs
+
+Экспортируем перменные для ключей.
+
+$ export AWS_ACCESS_KEY_ID="<your access key id>"
+$ export AWS_SECRET_ACCESS_KEY="<your access secret key>"
+$ export AWS_DEFAULT_REGION="<your region>"
+
+Экспортируем все необходимые переменные которые мы не хотим "показывать"
+
+$ export SSH_PORT="<ssh port>"
+$ export MYSQL_ROOT_PASS="<mysql root password>"
+$ export MYSQL_ADMIN_USER="<mysql admin user>"
+$ export MYSQL_ADMIN_USER_PASS="<mysql admin password>"
+$ export MYSQL_DRUPAL_USER="<mysql drupal user name>"
+$ export MYSQL_DRUPAL_USER_PASS="<mysql drupal user password>"
+$ export MYSQL_DRUPAL_DB="<mysql drupal database>"
+
+
+
+$ packer validate lemp_aws.pkr.hcl
+The configuration is valid.
+
+
+$ packer console lemp_aws.pkr.hcl
+> Variables
+> > input-variables:
+
+...
+
+
+$ packer build lemp_aws.pkr.hcl
+amazon-ebs.rocinante-lemp: output will be in this color.
+
+==> amazon-ebs.rocinante-lemp: Prevalidating any provided VPC information
+==> amazon-ebs.rocinante-lemp: Prevalidating AMI Name: rocinante-lemp-ami
+    amazon-ebs.rocinante-lemp: Found Image ID: ami-09439f09c55136ecf
+==> amazon-ebs.rocinante-lemp: Creating temporary keypair: packer_629da4b8-a3a6-e6cb-49ec-0db5a9290cc2
+==> amazon-ebs.rocinante-lemp: Creating temporary security group for this instance: packer_629da4bf-0cd6-7ee1-ca9c-df17443c44c2
+==> amazon-ebs.rocinante-lemp: Authorizing access to port 22 from [0.0.0.0/0] in the temporary security groups...
+==> amazon-ebs.rocinante-lemp: Launching a source AWS instance...
+    amazon-ebs.rocinante-lemp: Instance ID: i-0f3734647da033506
+==> amazon-ebs.rocinante-lemp: Waiting for instance (i-0f3734647da033506) to become ready...
+
+==> amazon-ebs.rocinante-lemp: Connected to SSH!
+==> amazon-ebs.rocinante-lemp: Pausing 5s before the next provisioner...
+==> amazon-ebs.rocinante-lemp: Provisioning with shell script: ./provisioning/script.sh
+
+...
+
+==> amazon-ebs.rocinante-lemp: Pausing 5s before the next provisioner...
+==> amazon-ebs.rocinante-lemp: Uploading ./provisioning/configs.tar.bz => /tmp/configs.tar.bz
+    amazon-ebs.rocinante-lemp: configs.tar.bz 20.31 KiB / 20.31 KiB [=========================================================================================] 100.00% 1s
+==> amazon-ebs.rocinante-lemp: Pausing 5s before the next provisioner...
+==> amazon-ebs.rocinante-lemp: Provisioning with shell script: /tmp/packer-shell2765964825
+
+...
+
+=> amazon-ebs.rocinante-lemp: Stopping the source instance...
+    amazon-ebs.rocinante-lemp: Stopping instance
+==> amazon-ebs.rocinante-lemp: Waiting for the instance to stop...
+==> amazon-ebs.rocinante-lemp: Creating AMI rocinante-lemp-ami from instance i-0f3734647da033506
+    amazon-ebs.rocinante-lemp: AMI: ami-0a750ddb8d8cfe08f
+==> amazon-ebs.rocinante-lemp: Waiting for AMI to become ready...
+==> amazon-ebs.rocinante-lemp: Skipping Enable AMI deprecation...
+==> amazon-ebs.rocinante-lemp: Terminating the source AWS instance...
+==> amazon-ebs.rocinante-lemp: Cleaning up any extra volumes...
+==> amazon-ebs.rocinante-lemp: No volumes to clean up, skipping
+==> amazon-ebs.rocinante-lemp: Deleting temporary security group...
+==> amazon-ebs.rocinante-lemp: Deleting temporary keypair...
+Build 'amazon-ebs.rocinante-lemp' finished after 9 minutes 37 seconds.
+
+==> Wait completed after 9 minutes 37 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> amazon-ebs.rocinante-lemp: AMIs were created:
+eu-central-1: ami-0a750ddb8d8cfe08f
+
+
+Все готово, теперь можно создавать instances'ы с помощью данного AMI.
+
+
+
+-----
+БОНУС
+-----
+
+Для примера вы можете ознакомиться с простой версией создания образа - lemp_aws_simple.pkr.hcl.
+
+Она отличается тем, что там не используется функция templatefile, а просто выполняем
+скрипт - script.sh. Конечно же это менее безопасно чем с использованием templatefile,
+т.к. все переменные паказаны в скрипте (например, пароли)
